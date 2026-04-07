@@ -1,0 +1,81 @@
+name: personal-budget-env
+version: 1.0.0
+description: >
+  Real-world personal finance environment simulating one month of household
+  budgeting for a salaried individual in India. The agent manages a ₹65,000
+  monthly salary, pays recurring bills, tracks spending across 8 categories,
+  and builds savings goals — all while staying solvent and making smart
+  financial decisions. Features India-specific mechanics including UPI payments,
+  festival/medical expense tracking, and realistic INR amounts.
+
+author: Gopika M
+tags:
+  - finance
+  - budgeting
+  - personal-finance
+  - real-world
+  - upi
+  - india
+  - openenv
+
+docker_image: budget-api
+port: 8000
+entrypoint: server:app
+
+tasks:
+  - id: task1_easy_category_grader
+    name: Category Grader
+    difficulty: easy
+    description: >
+      Check whether the agent assigns the correct spending category to each
+      transaction. Example: '₹500 spent on Swiggy' should be categorised as
+      'food'. Score = correct categorisations / total categorisable transactions.
+
+  - id: task2_medium_risk_grader
+    name: Risk / Priority Grader
+    difficulty: medium
+    description: >
+      Check whether the agent correctly detects dangerous financial situations
+      such as low balance, category overspend, or unpaid bills past step 20,
+      and responds with a non-spending action (pay_bill, allocate_to_goal,
+      review_summary). Score = risk situations detected / total risk events.
+
+  - id: task3_hard_suggestion_grader
+    name: Suggestion Grader
+    difficulty: hard
+    description: >
+      Check whether the agent takes useful corrective actions after high-risk
+      events AND maintains a healthy ending balance AND completes savings goals.
+      Score = 0.60 x (useful corrections) + 0.25 x (balance health) +
+      0.15 x (goal completion). Requires sustained long-horizon planning.
+
+action_space:
+  type: discrete
+  actions:
+    - record_transaction
+    - set_budget
+    - pay_bill
+    - allocate_to_goal
+    - review_summary
+
+observation_space:
+  current_balance: float        # INR remaining this month
+  monthly_income: float         # Fixed at ₹65,000
+  category_budgets: dict        # limit / spent / remaining per category
+  recent_transactions: list     # Last 5 transactions
+  upcoming_bills: list          # Unpaid bills with amounts
+  goals: dict                   # target / current per savings goal
+  step_count: int               # Current step (max 30)
+  inbox_summary: str            # Human-readable status summary
+
+reward:
+  type: dense
+  range: [0.0, 1.0]
+  description: >
+    Dense reward provided at every step. Rewards correct categorisation,
+    bill payments, goal allocations, and UPI usage. Penalises overspending,
+    negative balance, invalid actions, and late unpaid bills.
+
+episode:
+  max_steps: 30
+  early_termination: balance < 0
