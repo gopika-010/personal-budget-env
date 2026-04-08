@@ -19,7 +19,7 @@ tags:
   - openenv
 
 docker_image: budget-api
-port: 8000
+port: 7860
 entrypoint: server:app
 
 tasks:
