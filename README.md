@@ -80,9 +80,9 @@ It provides a strong testbed for agentic reasoning, long-horizon planning, and p
 ```bash
 pip install fastapi uvicorn pydantic requests openai
 python -m uvicorn server:app --reload
----
+
 ## API Usage
 
 Open the API docs here:
 https://sweathabala-personal-budget-env.hf.space/docs
----
+
