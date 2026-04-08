@@ -1,0 +1,13 @@
+[project]
+name = "personal-budget-env"
+version = "1.0.0"
+description = "Personal finance environment for OpenEnv Hackathon"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "pydantic>=2.0.0"
+]
+
+[tool.openenv]
+entrypoint = "server:app"
