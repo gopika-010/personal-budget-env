@@ -7,7 +7,11 @@ app = FastAPI(title="PersonalBudgetEnv - OpenEnv Hackathon")
 
 @app.get("/")
 def home():
-    return {"status": "running"}
+    return {
+        "status": "running",
+        "docs": "/docs",
+        "message": "Open /docs to test API"
+    }
 
 
 env = PersonalBudgetEnvironment()
