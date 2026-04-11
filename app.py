@@ -1,7 +1,6 @@
 from fastapi import FastAPI
-from budget_env import PersonalBudgetEnvironment   
-from models import BudgetAction                   
-import uvicorn
+from budget_env import PersonalBudgetEnvironment
+from models import BudgetAction
 
 app = FastAPI(title="PersonalBudgetEnv - OpenEnv Hackathon")
 
@@ -37,6 +36,3 @@ async def step(action: BudgetAction):
 async def get_state():
     """Return current state (for debugging)."""
     return {"state": env.state().model_dump()}
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
