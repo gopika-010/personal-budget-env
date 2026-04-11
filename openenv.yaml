@@ -20,7 +20,7 @@ tags:
 
 docker_image: budget-api
 port: 7860
-entrypoint: app:app
+entrypoint: server:app
 
 tasks:
   - id: task1_easy_category_grader
