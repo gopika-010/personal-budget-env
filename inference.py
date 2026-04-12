@@ -32,9 +32,16 @@ llm_client = OpenAI(
 
 ENV_URL = API_BASE_URL.rstrip("/")
 
+
 def env_reset() -> Dict[str, Any]:
     try:
-        resp = requests.post(f"{ENV_URL}/reset", timeout=60)
+        resp = requests.post(
+            f"{ENV_URL}/reset",
+            headers={"Content-Type": "application/json"},
+            json={},  # important
+            timeout=60
+        )
+        print("STATUS:", resp.status_code, flush=True)
         resp.raise_for_status()
         return resp.json().get("observation", {})
     except Exception as e:
@@ -49,14 +56,15 @@ def env_reset() -> Dict[str, Any]:
             "inbox_summary": "fallback"
         }
 
-
 def env_step(action: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = requests.post(
             f"{ENV_URL}/step",
+            headers={"Content-Type": "application/json"},
             json=action,
             timeout=60
         )
+        print("STEP STATUS:", resp.status_code, flush=True)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
