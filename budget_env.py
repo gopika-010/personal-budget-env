@@ -535,10 +535,13 @@ class PersonalBudgetEnvironment:
     # ─────────────────────────────────────────
 
     def _get_task_scores(self) -> Dict[str, float]:
+        def clamp(x):
+           return max(0.01, min(0.99, x))   # ✅ ensures strictly between (0,1)
+
         return {
-            "task1_easy_category_grader":      round(self._grade_task1(), 4),
-            "task2_medium_risk_grader":        round(self._grade_task2(), 4),
-            "task3_hard_suggestion_grader":    round(self._grade_task3(), 4),
+           "task1_easy_category_grader":   round(clamp(self._grade_task1()), 4),
+           "task2_medium_risk_grader":     round(clamp(self._grade_task2()), 4),
+           "task3_hard_suggestion_grader": round(clamp(self._grade_task3()), 4),
         }
 
     def get_tasks(self) -> List[Dict[str, Any]]:
@@ -659,7 +662,7 @@ class PersonalBudgetEnvironment:
 
         if categorisable == 0:
             # No categorisable transactions — partial credit for at least logging something
-            return 0.3 if self.transactions else 0.0
+            return 0.3 if self.transactions else 0.05
 
         return correct / categorisable
 
@@ -696,7 +699,7 @@ class PersonalBudgetEnvironment:
         """
         if not self.risk_events:
             # No risk events arose — give full score (well-managed episode)
-            return 1.0
+            return 0.95
 
         detected = sum(1 for e in self.risk_events if e["detected"])
         return detected / len(self.risk_events)
@@ -725,17 +728,18 @@ class PersonalBudgetEnvironment:
             useful   = sum(1 for e in self.risk_events if e["useful_action"])
             sug_score = useful / len(self.risk_events)
         else:
-            sug_score = 1.0  # No risk events → agent managed well
+            sug_score = 0.95
 
         # Component 2: ending balance health
         health_target  = self.MONTHLY_INCOME * 0.20
-        balance_score  = min(max(self.balance, 0) / health_target, 1.0)
+        balance_score  = min(max(self.balance, 0) / health_target, 0.95)
 
         # Component 3: savings goal completion
         completed_goals = sum(
             1 for g in self.goals.values()
             if g["current"] >= g["target"]
         )
-        goal_bonus = min(completed_goals / len(self.goals), 1.0) if self.goals else 0.0
+        goal_bonus = min(completed_goals / len(self.goals), 1.0) if self.goals else 0.95
 
         return (sug_score * 0.60) + (balance_score * 0.25) + (goal_bonus * 0.15)
+
