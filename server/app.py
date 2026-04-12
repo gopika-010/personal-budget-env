@@ -1,12 +1,15 @@
 from fastapi import FastAPI
 from budget_env import PersonalBudgetEnvironment
 from models import BudgetAction
+import uvicorn
 
 app = FastAPI(title="PersonalBudgetEnv - OpenEnv Hackathon")
 
 @app.get("/")
 def home():
     return {
+        "name":"PersonalBudgetEnv",
+        "endpoints":["/reset","/step","/state","/tasks","/health"],
         "status": "running",
         "docs": "/docs",
         "message": "Open /docs to test API"
