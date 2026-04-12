@@ -16,7 +16,7 @@ from typing import List, Dict, Any
 from openai import OpenAI
 
 # ── Environment Variables (set as HF Space secrets) ──────────────────────────
-API_BASE_URL  = os.getenv("API_BASE_URL", "https://huggingface.co/spaces/Sweathabala/personal-budget-env")   # HF Space URL
+API_BASE_URL  = os.getenv("API_BASE_URL", "https://sweathabala-personal-budget-env.hf.space")   # HF Space URL
 MODEL_NAME    = os.getenv("MODEL_NAME",   "mistralai/Mistral-7B-Instruct-v0.3")
 HF_TOKEN      = os.getenv("HF_TOKEN",     "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", HF_TOKEN)  # fallback to HF_TOKEN
