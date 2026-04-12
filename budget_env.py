@@ -17,9 +17,9 @@ OpenEnv interface:
   step(action)   → (BudgetObservation, BudgetReward, done: bool, info: dict)
 
 Tasks (easy → medium → hard):
-  task1_bill_payment      — pay all bills and log transactions
-  task2_budget_adherence  — stay within every category limit
-  task3_financial_planning — hit savings goals + safe balance + UPI usage
+  task1_easy_category_grader      — correct category per transaction
+  task2_medium_risk_grader        — detect and respond to high-risk states
+  task3_hard_suggestion_grader    — useful corrective actions + balance + goals
 """
 
 import random
@@ -55,8 +55,8 @@ class PersonalBudgetEnvironment:
     }
 
     BILL_TEMPLATES: List[Dict[str, Any]] = [
-        {"name": "Electricity", "amount": 2_500.0, "category": "utilities"},
-        {"name": "Internet",    "amount":   999.0, "category": "utilities"},
+        {"name": "Electricity", "amount": 2_500.0,  "category": "utilities"},
+        {"name": "Internet",    "amount":   999.0,  "category": "utilities"},
         {"name": "Rent",        "amount": 15_000.0, "category": "rent"},
     ]
 
@@ -75,6 +75,8 @@ class PersonalBudgetEnvironment:
         self.goals: Dict[str, Dict[str, float]] = {}
         self.step_count: int = 0
         self.done: bool = False
+        self.risk_events: List[Dict[str, Any]] = []
+        self._prev_was_high_risk: bool = False
         self.reset()
 
     # ─────────────────────────────────────────
@@ -86,13 +88,13 @@ class PersonalBudgetEnvironment:
         Start a fresh episode.
         Sets balance to monthly salary, resets all bills to unpaid,
         zeros all spending, and clears transaction history.
-        random.seed(42) makes grader scores reproducible for the baseline script.
+        random.seed(42) makes grader scores reproducible.
         """
         random.seed(42)
 
-        self.balance = self.MONTHLY_INCOME
+        self.balance    = self.MONTHLY_INCOME
         self.step_count = 0
-        self.done = False
+        self.done       = False
 
         # Fresh category budgets — zero spending
         self.category_budgets = {
@@ -112,11 +114,9 @@ class PersonalBudgetEnvironment:
             "vacation":       {"target":  5_000.0, "current": 0.0},
         }
 
-        self.transactions = []
-
-        # Risk event log — used by Task 2 & Task 3 graders
-        self.risk_events: List[Dict[str, Any]] = []
-        self._prev_was_high_risk: bool = False
+        self.transactions         = []
+        self.risk_events          = []
+        self._prev_was_high_risk  = False
 
         return self.state()
 
@@ -164,7 +164,7 @@ class PersonalBudgetEnvironment:
             for t in self.transactions[-5:]
         ]
 
-        # Build a concise human-readable status string
+        # Human-readable status string
         unpaid_names = [b["name"] for b in self.bills if not b["paid"]]
         over_cats    = [c for c, d in self.category_budgets.items() if d["spent"] > d["limit"]]
 
@@ -200,8 +200,6 @@ class PersonalBudgetEnvironment:
         done=True when:
           • step_count reaches MAX_STEPS (natural episode end), or
           • balance drops below 0 (agent went bankrupt — early termination)
-
-        info always contains task_scores so the inference script can log them.
         """
         if self.done:
             return (
@@ -215,27 +213,26 @@ class PersonalBudgetEnvironment:
         feedback = self._apply_action(action)
         reward   = self._calculate_reward(action, feedback)
 
-        # ── Risk event tracking (for Task 2 & Task 3 graders) ──────────
-        # If PREVIOUS state was high-risk, log whether this action detected it
+        # ── Risk event tracking ─────────────────────────────────────────
         if self._prev_was_high_risk:
             useful_action = action.action_type in (
                 "pay_bill", "allocate_to_goal", "set_budget", "review_summary"
             )
             self.risk_events.append({
-                "step":         self.step_count,
-                "detected":     action.action_type != "record_transaction",
+                "step":          self.step_count,
+                "detected":      action.action_type != "record_transaction",
                 "useful_action": useful_action,
             })
         self._prev_was_high_risk = self._is_high_risk()
-        # ────────────────────────────────────────────────────────────────
+        # ───────────────────────────────────────────────────────────────
 
         self.done = (self.step_count >= self.MAX_STEPS) or (self.balance < 0)
 
         info: Dict[str, Any] = {
-            "task_scores":    self._get_task_scores(),
+            "task_scores":     self._get_task_scores(),
             "action_feedback": feedback,
-            "step":           self.step_count,
-            "done":           self.done,
+            "step":            self.step_count,
+            "done":            self.done,
         }
 
         return self.state(), reward, self.done, info
@@ -245,10 +242,7 @@ class PersonalBudgetEnvironment:
     # ─────────────────────────────────────────
 
     def _apply_action(self, action: BudgetAction) -> Dict[str, Any]:
-        """
-        Mutate the environment state based on the action.
-        Returns a structured feedback dict consumed by _calculate_reward().
-        """
+        """Mutate environment state based on the action."""
         fb: Dict[str, Any] = {
             "valid":              True,
             "message":            "",
@@ -268,7 +262,6 @@ class PersonalBudgetEnvironment:
                 fb["message"] = "Amount must be > 0"
                 return fb
 
-            # Deduct from balance regardless of category validity
             self.balance -= action.amount
 
             if action.category not in self.VALID_CATEGORIES:
@@ -341,13 +334,15 @@ class PersonalBudgetEnvironment:
                 )
                 return fb
 
-            bill["paid"] = True
+            bill["paid"]  = True
             self.balance -= bill["amount"]
-            cat = bill["category"]
+            cat           = bill["category"]
+
             if "rent" in bill["name"].lower():
                 fb["high_priority_bill_paid"] = True
             elif "electricity" in bill["name"].lower() or "internet" in bill["name"].lower():
                 fb["medium_priority_bill_paid"] = True
+
             if cat in self.category_budgets:
                 self.category_budgets[cat]["spent"] += bill["amount"]
 
@@ -379,9 +374,14 @@ class PersonalBudgetEnvironment:
                 fb["message"]            = "Insufficient balance for goal allocation"
                 return fb
 
-            goal = self.goals[action.goal_name]
-            # Only allocate what's still needed — no over-saving
-            to_allocate  = min(action.amount, goal["target"] - goal["current"])
+            goal        = self.goals[action.goal_name]
+            to_allocate = min(action.amount, goal["target"] - goal["current"])
+
+            # Nothing left to allocate — goal already complete
+            if to_allocate <= 0:
+                fb["message"] = f"Goal '{action.goal_name}' already complete"
+                return fb
+
             goal["current"] = round(goal["current"] + to_allocate, 2)
             self.balance    = round(self.balance - to_allocate, 2)
 
@@ -413,7 +413,7 @@ class PersonalBudgetEnvironment:
         action: BudgetAction,
         feedback: Dict[str, Any],
     ) -> BudgetReward:
-        score = 0.0
+        score   = 0.0
         reasons: List[str] = []
 
         # Invalid actions
@@ -461,16 +461,14 @@ class PersonalBudgetEnvironment:
         elif action.action_type == "pay_bill":
             if feedback.get("bill_already_paid"):
                 score -= 0.05
-                reasons.append("duplicate payment -0.06")
+                reasons.append("duplicate payment -0.05")
             else:
                 score += 0.38
                 reasons.append("bill paid +0.38")
 
-                # Priority bonus
                 if feedback.get("high_priority_bill_paid"):
                     score += 0.15
                     reasons.append("rent priority +0.15")
-
                 elif feedback.get("medium_priority_bill_paid"):
                     score += 0.07
                     reasons.append("utility priority +0.07")
@@ -491,68 +489,71 @@ class PersonalBudgetEnvironment:
             reasons.append("review check-in +0.08")
 
         # === Global state adjustments (every step) ===
-        # Balance safety - proportional
         balance_ratio = max(0.0, self.balance / self.MONTHLY_INCOME)
-        score += 0.08 * min(balance_ratio, 1.0)
-        reasons.append(f"balance safety +{0.08 * min(balance_ratio, 1.0):.2f}")
+        balance_bonus = round(0.08 * min(balance_ratio, 1.0), 4)
+        score        += balance_bonus
+        reasons.append(f"balance safety +{balance_bonus:.2f}")
 
         if self.balance < 0:
             score -= 0.60
             reasons.append("negative balance -0.60")
 
-        # Bill penalties - gentle early, stronger later
+        # Unpaid bill penalty — light early, strong late
         unpaid_count = sum(1 for b in self.bills if not b.get("paid", True))
         if unpaid_count > 0 and self.step_count > 2:
-            penalty = 0.04 * unpaid_count                    # light early penalty
-            if self.step_count > 3:
-                penalty = 0.02 * unpaid_count * self.step_count               # stronger late penalty
-            score -= penalty
+            penalty = (
+                round(0.02 * unpaid_count * self.step_count, 4)
+                if self.step_count > 3
+                else round(0.04 * unpaid_count, 4)
+            )
+            score  -= penalty
             reasons.append(f"unpaid bills -{penalty:.2f}")
 
-        # Mild goal progress penalty after mid-episode
+        # Goal progress penalty after mid-episode
         if self.step_count > 15:
-            total_progress = sum(
-                g["current"] / g["target"] for g in self.goals.values() if g["target"] > 0
-            ) / len(self.goals) if self.goals else 0.0
+            total_progress = (
+                sum(
+                    g["current"] / g["target"]
+                    for g in self.goals.values()
+                    if g["target"] > 0
+                ) / len(self.goals)
+            ) if self.goals else 0.0
+
             if total_progress < 0.25:
                 score -= 0.10
                 reasons.append("low goal progress -0.10")
 
-        # Light penalty for spamming review_summary
+        # Spam penalty for review_summary
         if action.action_type == "review_summary" and self.step_count > 8:
             score -= 0.04
             reasons.append("repeated review -0.04")
 
-        # Final clamp to [0.0, 1.0]
         final_score = round(max(0.0, min(1.0, score)), 3)
-
         return BudgetReward(
             value=final_score,
             reason=" | ".join(reasons) or "neutral",
         )
+
     # ─────────────────────────────────────────
     #  Task graders  (deterministic, 0.0–1.0)
     # ─────────────────────────────────────────
 
     def _get_task_scores(self) -> Dict[str, float]:
-       def safe(x):
-        # NEVER allow 0 or 1
-          if x <= 0:
-             return 0.05
-          if x >= 1:
-             return 0.95
-          return x
+        """
+        Returns all three task scores clamped to [0.0, 1.0].
+        All three keys must exactly match get_tasks() IDs.
+        """
+        def safe(x: float) -> float:
+            return round(max(0.0, min(1.0, x)), 4)
 
-       return {
-           "task1_easy_category_grader":   round(safe(self._grade_task1()), 4),
-           "task2_medium_risk_grader":     round(safe(self._grade_task2()), 4),
-           "task3_hard_suggestion_grader": round(safe(self._grade_task3()), 4),
+        return {
+            "task1_easy_category_grader":   safe(self._grade_task1()),
+            "task2_medium_risk_grader":     safe(self._grade_task2()),
+            "task3_hard_suggestion_grader": safe(self._grade_task3()),
         }
 
     def get_tasks(self) -> List[Dict[str, Any]]:
-        """
-        Returns task metadata for openenv.yaml / validator enumeration.
-        """
+        """Returns task metadata — IDs must exactly match _get_task_scores() keys."""
         return [
             {
                 "id":          "task1_easy_category_grader",
@@ -604,7 +605,6 @@ class PersonalBudgetEnvironment:
 
     # ── Grader implementations ─────────────────────────────────────────
 
-    # Keyword → expected category mapping (India-specific descriptions)
     CATEGORY_KEYWORDS: Dict[str, List[str]] = {
         "food":          ["swiggy", "zomato", "restaurant", "lunch", "dinner",
                           "breakfast", "grocery", "groceries", "blinkit", "zepto",
@@ -625,32 +625,18 @@ class PersonalBudgetEnvironment:
     }
 
     def _infer_expected_category(self, description: str) -> str:
-        """
-        Return the most likely category for a transaction description.
-        Used by Task 1 grader to check agent's categorisation accuracy.
-        """
+        """Return the most likely category for a transaction description."""
         desc_lower = description.lower()
         for cat, keywords in self.CATEGORY_KEYWORDS.items():
             if any(kw in desc_lower for kw in keywords):
                 return cat
-        return ""  # unknown / ambiguous
+        return ""  # ambiguous — skip in grader
 
     def _grade_task1(self) -> float:
         """
         Task 1 (Easy) — Category Grader.
-
-        For every recorded transaction that has a non-empty description,
-        check whether the agent chose the correct category by matching the
-        description against known India-specific keywords.
-
         score = correct_categorisations / categorisable_transactions
-
-        Example: "₹500 spent on Swiggy" → expected 'food'.
-          Agent says 'food'     → ✅ +1
-          Agent says 'shopping' → ❌  0
-
-        Transactions with ambiguous descriptions are skipped (not penalised).
-        A careful agent with good keyword awareness scores ≥0.85.
+        Ambiguous descriptions are skipped (not penalised).
         """
         categorisable = 0
         correct       = 0
@@ -666,44 +652,31 @@ class PersonalBudgetEnvironment:
                 correct += 1
 
         if categorisable == 0:
-            # No categorisable transactions — partial credit for at least logging something
-            return 0.3 if self.transactions else 0.05
+            # Partial credit if at least something was logged
+            return 0.5 if self.transactions else 0.1
 
         return correct / categorisable
 
     def _is_high_risk(self) -> bool:
-        """Improved high-risk detection."""
+        """Detect whether the current state is financially high-risk."""
         low_balance = self.balance < (self.MONTHLY_INCOME * 0.18)
-        overspent = any(
+        overspent   = any(
             d["spent"] > d["limit"] * 1.12
             for d in self.category_budgets.values()
         )
-        late_bills = self.step_count > 12 and any(not b.get("paid", True) for b in self.bills)
+        late_bills  = self.step_count > 12 and any(
+            not b.get("paid", True) for b in self.bills
+        )
         return low_balance or overspent or late_bills
+
     def _grade_task2(self) -> float:
         """
         Task 2 (Medium) — Risk / Priority Grader.
-
-        Checks whether the agent correctly identifies and responds to
-        dangerous financial situations.
-
-        Tracked during the episode via self.risk_events list (set in reset).
-        Each risk event records:
-          - was_high_risk: True/False at time of event
-          - agent_action:  what the agent did at that step
-
-        A risk event is DETECTED when the agent's next action after a
-        high-risk state is NOT another spending transaction (i.e. the agent
-        paused to assess the situation).
-
         score = detected_risk_events / total_risk_events
-
-        Example: Balance drops low → if the agent immediately records another
-        spend, that's a miss. If it pays a bill, reviews, or allocates to
-        savings, that's a detection.
+        A risk event is detected when the agent's next action is NOT another spend.
         """
         if not self.risk_events:
-            # No risk events arose — give full score (well-managed episode)
+            # No risk events — episode was well-managed, award near-full score
             return 0.9
 
         detected = sum(1 for e in self.risk_events if e["detected"])
@@ -713,38 +686,33 @@ class PersonalBudgetEnvironment:
         """
         Task 3 (Hard) — Suggestion Grader.
 
-        After each high-risk event, checks whether the agent took a USEFUL
-        corrective action:
-          ✅ Useful:  pay_bill, allocate_to_goal, set_budget, review_summary
-          ❌ Not useful: another record_transaction (keeps spending)
-
-        Also rewards:
-          - Ending episode with balance > 20% of income (financially healthy)
-          - Having ≥1 completed savings goal
-
         score = 0.60 × (useful corrections / risk events)
               + 0.25 × balance health
               + 0.15 × goal completion bonus
 
-        Frontier models score ~0.55 without explicit corrective reasoning.
+        Useful actions after high-risk: pay_bill, allocate_to_goal,
+        set_budget, review_summary. Continuing to spend is not useful.
         """
-        # Component 1: useful suggestions after risk events
+        # Component 1: useful corrective actions
         if self.risk_events:
-            useful   = sum(1 for e in self.risk_events if e["useful_action"])
+            useful    = sum(1 for e in self.risk_events if e["useful_action"])
             sug_score = useful / len(self.risk_events)
         else:
-            sug_score = 0.9
+            sug_score = 0.9  # no risk events — episode was healthy
 
-        # Component 2: ending balance health
-        health_target  = self.MONTHLY_INCOME * 0.20
-        balance_score  = min(max(self.balance, 0) / health_target, 0.95)
+        # Component 2: ending balance health (capped at 1.0)
+        health_target = self.MONTHLY_INCOME * 0.20
+        balance_score = min(max(self.balance, 0.0) / health_target, 1.0)
 
-        # Component 3: savings goal completion
+        # Component 3: savings goal completion (capped at 1.0)
         completed_goals = sum(
             1 for g in self.goals.values()
             if g["current"] >= g["target"]
         )
-        goal_bonus = min(completed_goals / len(self.goals), 1.0) if self.goals else 0.95
+        goal_bonus = (
+            min(completed_goals / len(self.goals), 1.0)
+            if self.goals else 0.0
+        )
 
-        return (sug_score * 0.60) + (balance_score * 0.25) + (goal_bonus * 0.15)
-
+        raw = (sug_score * 0.60) + (balance_score * 0.25) + (goal_bonus * 0.15)
+        return round(max(0.0, min(1.0, raw)), 4)

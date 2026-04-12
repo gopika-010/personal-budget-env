@@ -128,6 +128,9 @@ def validate_action(action: Dict[str, Any]) -> Dict[str, Any]:
     action.setdefault("category", "")
     action.setdefault("description", "")
     action.setdefault("bill_name", "")
+    # FIX: default goal_name to "emergency_fund" so env never gets an empty string
+    if action.get("action_type") == "allocate_to_goal" and not action.get("goal_name"):
+        action["goal_name"] = "emergency_fund"
     action.setdefault("goal_name", "")
     return action
 
@@ -148,18 +151,21 @@ CATEGORY_DESCRIPTIONS = {
 }
 
 
-def smart_priority(action, obs, step, paid_bills, goals_done):
-    # Force bill payment in first 5 steps
-    if step < 5:
-        for bill in obs.get("upcoming_bills", []):
-            name = bill.get("name", "")
-            if name and name not in paid_bills:
-                paid_bills.add(name)
-                return {
-                    "action_type": "pay_bill", "bill_name": name,
-                    "amount": bill.get("amount", 0), "mode": "UPI",
-                    "target": 0.0, "category": "", "description": "", "goal_name": "",
-                }
+def smart_priority(action, obs, step, goals_done):
+    # FIX: check env observation directly for unpaid bills instead of a local set
+    # this prevents desyncs when env_step fails and bill was never actually paid
+    unpaid = [b.get("name", "") for b in obs.get("upcoming_bills", []) if b.get("name")]
+    if unpaid and step < 8:
+        name = unpaid[0]
+        amount = next(
+            (b.get("amount", 0) for b in obs.get("upcoming_bills", [])
+             if b.get("name") == name), 0
+        )
+        return {
+            "action_type": "pay_bill", "bill_name": name,
+            "amount": amount, "mode": "UPI",
+            "target": 0.0, "category": "", "description": "", "goal_name": "",
+        }
 
     # Skip completed goals
     if action["action_type"] == "allocate_to_goal":
@@ -183,11 +189,12 @@ def smart_priority(action, obs, step, paid_bills, goals_done):
     return action
 
 
-def run_task(task_id: str, task_index: int) -> Dict[str, Any]:
+# FIX: replaced 3x run_task() with a single run_episode() so all three graders
+# score the same episode — risk_events and transactions accumulate properly
+def run_episode() -> Dict[str, Any]:
     obs = env_reset()
     history = []
     total_reward = 0.0
-    paid_bills = set()
     goals_done = set()
     last_info = {}
 
@@ -195,8 +202,9 @@ def run_task(task_id: str, task_index: int) -> Dict[str, Any]:
         obs_text = format_observation(obs)
         history.append({"role": "user", "content": obs_text})
 
-        action = validate_action(call_llm(history[-6:]))
-        action = smart_priority(action, obs, step, paid_bills, goals_done)
+        # FIX: keep last 10 turns (up from 6) so LLM remembers bill/goal state
+        action = validate_action(call_llm(history[-10:]))
+        action = smart_priority(action, obs, step, goals_done)
 
         history.append({"role": "assistant", "content": json.dumps(action)})
 
@@ -209,34 +217,25 @@ def run_task(task_id: str, task_index: int) -> Dict[str, Any]:
 
         total_reward += reward
 
-        print(f"[STEP] {json.dumps({'task': task_id, 'step': step, 'action': action['action_type'], 'reward': round(reward, 4), 'reason': reason})}", flush=True)
+        print(f"[STEP] {json.dumps({'step': step, 'action': action['action_type'], 'reward': round(reward, 4), 'reason': reason})}", flush=True)
 
         if done:
             break
 
     task_scores = last_info.get("task_scores", {})
     return {
-        "task_id": task_id,
         "total_reward": round(total_reward, 4),
         "task_scores": task_scores,
     }
 
 
 def main():
-    tasks = [
-        "task1_easy_category_grader",
-        "task2_medium_risk_grader",
-        "task3_hard_suggestion_grader",
-    ]
+    # FIX: removed API_KEY / hf_token from [START] log to avoid token leakage
+    print(f'[START] {json.dumps({"task_id": "all", "model": MODEL_NAME})}', flush=True)
 
-    # FIX 4: Use API_KEY in [START] log
-    print(f'[START] {json.dumps({"task_id": "all", "model": MODEL_NAME, "hf_token": API_KEY})}', flush=True)
-
-    all_task_scores = {}
-    for i, task_id in enumerate(tasks):
-        result = run_task(task_id, i)
-        for k, v in result["task_scores"].items():
-            all_task_scores[k] = v
+    # FIX: single episode — all three task scores come from the same run
+    result = run_episode()
+    all_task_scores = result["task_scores"]
 
     grader_scores = [
         all_task_scores.get("task1_easy_category_grader",  0.0),
