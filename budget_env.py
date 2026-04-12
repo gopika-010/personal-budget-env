@@ -535,13 +535,18 @@ class PersonalBudgetEnvironment:
     # ─────────────────────────────────────────
 
     def _get_task_scores(self) -> Dict[str, float]:
-        def clamp(x):
-           return max(0.01, min(0.99, x))   # ✅ ensures strictly between (0,1)
+       def safe(x):
+        # NEVER allow 0 or 1
+          if x <= 0:
+             return 0.05
+          if x >= 1:
+             return 0.95
+          return x
 
-        return {
-           "task1_easy_category_grader":   round(clamp(self._grade_task1()), 4),
-           "task2_medium_risk_grader":     round(clamp(self._grade_task2()), 4),
-           "task3_hard_suggestion_grader": round(clamp(self._grade_task3()), 4),
+       return {
+           "task1_easy_category_grader":   round(safe(self._grade_task1()), 4),
+           "task2_medium_risk_grader":     round(safe(self._grade_task2()), 4),
+           "task3_hard_suggestion_grader": round(safe(self._grade_task3()), 4),
         }
 
     def get_tasks(self) -> List[Dict[str, Any]]:
@@ -699,7 +704,7 @@ class PersonalBudgetEnvironment:
         """
         if not self.risk_events:
             # No risk events arose — give full score (well-managed episode)
-            return 0.95
+            return 0.9
 
         detected = sum(1 for e in self.risk_events if e["detected"])
         return detected / len(self.risk_events)
@@ -728,7 +733,7 @@ class PersonalBudgetEnvironment:
             useful   = sum(1 for e in self.risk_events if e["useful_action"])
             sug_score = useful / len(self.risk_events)
         else:
-            sug_score = 0.95
+            sug_score = 0.9
 
         # Component 2: ending balance health
         health_target  = self.MONTHLY_INCOME * 0.20
