@@ -16,7 +16,7 @@ from typing import List, Dict, Any
 from openai import OpenAI
 
 # ── Environment Variables (set as HF Space secrets) ──────────────────────────
-API_BASE_URL  = os.getenv("API_BASE_URL", "http://localhost:8000")   # HF Space URL
+API_BASE_URL  = os.getenv("API_BASE_URL", "https://huggingface.co/spaces/Sweathabala/personal-budget-env")   # HF Space URL
 MODEL_NAME    = os.getenv("MODEL_NAME",   "mistralai/Mistral-7B-Instruct-v0.3")
 HF_TOKEN      = os.getenv("HF_TOKEN",     "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", HF_TOKEN)  # fallback to HF_TOKEN
@@ -30,19 +30,27 @@ llm_client = OpenAI(
 # ── Environment Server (HTTP calls to FastAPI server on HF Space) ─────────────
 ENV_URL = API_BASE_URL.rstrip("/")
 
-
 def env_reset() -> Dict[str, Any]:
-    """Call /reset on the FastAPI server and return observation dict."""
-    resp = requests.post(f"{ENV_URL}/reset", timeout=30)
-    resp.raise_for_status()
-    return resp.json()["observation"]
-
+    try:
+        resp = requests.post(f"{ENV_URL}/reset", timeout=60)
+        resp.raise_for_status()
+        return resp.json()["observation"]
+    except Exception as e:
+        print(f"[ERROR] env_reset failed: {e}", flush=True)
+        raise
 
 def env_step(action: Dict[str, Any]) -> Dict[str, Any]:
-    """Call /step on the FastAPI server and return full response dict."""
-    resp = requests.post(f"{ENV_URL}/step", json=action, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = requests.post(
+            f"{ENV_URL}/step",
+            json=action,
+            timeout=60
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"[ERROR] env_step failed: {e}", flush=True)
+        raise
 
 
 # ── System Prompt ──────────────────────────────────────────────────────────────
