@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal, List, Dict, Any
+
+
 class BudgetAction(BaseModel):
     action_type: Literal[
         "record_transaction",
@@ -53,7 +55,17 @@ class BudgetObservation(BaseModel):
     step_count: int
     inbox_summary: str
 
+    @field_validator("current_balance")
+    @classmethod
+    def round_balance(cls, v: float) -> float:
+        return round(v, 2)
+
 
 class BudgetReward(BaseModel):
     value: float = Field(..., ge=0.0, le=1.0)
     reason: str
+
+    @field_validator("value")
+    @classmethod
+    def clamp_value(cls, v: float) -> float:
+        return round(max(0.0, min(1.0, v)), 4)
