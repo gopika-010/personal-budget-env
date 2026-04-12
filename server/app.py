@@ -36,3 +36,6 @@ async def step(action: BudgetAction):
 async def get_state():
     """Return current state (for debugging)."""
     return {"state": env.state().model_dump()}
+
+def main():
+    return app
