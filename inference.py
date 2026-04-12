@@ -126,6 +126,7 @@ def validate_action(action: Dict[str, Any]) -> Dict[str, Any]:
         action["action_type"] = "review_summary"
 
     action.setdefault("amount", 0.0)
+
     if action.get("amount", 0) <= 0:
         action["amount"] = 100.0
     action.setdefault("mode", "UPI")
